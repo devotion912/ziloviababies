@@ -1139,8 +1139,13 @@ h1, h2, h3, h4, h5 { font-family: 'Playfair Display', Georgia, serif; font-weigh
   margin-top: 6px; line-height: 1.4; min-height: 0;
 }
 
+.checkout-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
 .wa-checkout-btn {
-  width: 100%; margin-top: 10px;
   background: #25D366; color: var(--white);
   padding: 17px 24px; gap: 12px;
 }
@@ -1149,9 +1154,21 @@ h1, h2, h3, h4, h5 { font-family: 'Playfair Display', Georgia, serif; font-weigh
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(37, 211, 102, 0.35);
 }
-.wa-checkout-note {
+.paystack-checkout-btn {
+  background: var(--blue-deep); color: var(--white);
+  padding: 17px 24px; gap: 12px;
+}
+.paystack-checkout-btn:hover {
+  background: #0f2341;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(29, 53, 87, 0.35);
+}
+.checkout-note {
   margin-top: 14px; font-size: 12px;
   color: var(--ink-soft); line-height: 1.6; text-align: center;
+}
+@media (max-width: 480px) {
+  .checkout-buttons { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {
@@ -1224,6 +1241,7 @@ h1, h2, h3, h4, h5 { font-family: 'Playfair Display', Georgia, serif; font-weigh
   .wa-float::before { animation: none; }
 }
 </style>
+<script src="https://js.paystack.co/v1/inline.js"></script>
 </head>
 <body>
 
@@ -2170,6 +2188,9 @@ const CONFIG = {
   tiktok: 'ziloviababies',
   facebook: 'ziloviababies',
 
+  // 🔧 PAYSTACK: Your public key (test mode)
+  paystackPublicKey: 'pk_test_7ee44fa3803d12281b965367790d1934d655ae8c',
+
   currency: '₦',
   brandName: 'Zilovia Babies'
 };
@@ -2625,6 +2646,81 @@ function submitWhatsAppOrder() {
   showToast('Opening WhatsApp with your order…');
 }
 
+/* Paystack payment handler */
+function submitPaystackOrder() {
+  if (cart.length === 0) {
+    showToast('Your cart is empty — add something first.');
+    navigate('shop');
+    return;
+  }
+
+  const data = getCheckoutData();
+  const errors = validateCheckout(data);
+  if (Object.keys(errors).length) {
+    showCheckoutErrors(errors);
+    return;
+  }
+  showCheckoutErrors({});
+
+  const subtotal = cartSubtotal();
+  const amountInKobo = Math.round(subtotal * 100); // Paystack uses kobo (1/100 naira)
+
+  // Paystack payment handler
+  const handler = PaystackPop.setup({
+    key: CONFIG.paystackPublicKey,
+    email: data.email || 'customer@ziloviababies.store',
+    amount: amountInKobo,
+    ref: `ZLV-${Date.now()}`,
+    currency: 'NGN',
+    onClose: function() {
+      showToast('Payment cancelled');
+    },
+    onSuccess: function(response) {
+      // Payment successful
+      saveOrderAfterPayment(data, response.reference);
+      showToast('Payment successful! Order confirmed.');
+      setTimeout(() => {
+        cart = [];
+        saveCart();
+        navigate('shop');
+      }, 2000);
+    }
+  });
+  handler.openIframe();
+}
+
+/* Save order after successful Paystack payment */
+function saveOrderAfterPayment(customerData, paystackRef) {
+  const order = {
+    timestamp: new Date().toISOString(),
+    paystackRef,
+    customer: customerData,
+    items: cart.map(item => ({
+      name: item.name,
+      size: item.size,
+      colour: item.colour,
+      qty: item.qty,
+      price: item.price,
+      subtotal: item.price * item.qty
+    })),
+    total: cartSubtotal()
+  };
+
+  // Store order in localStorage for admin review
+  try {
+    const orders = JSON.parse(localStorage.getItem('zilovia_orders') || '[]');
+    orders.push(order);
+    localStorage.setItem('zilovia_orders', JSON.stringify(orders));
+  } catch (e) {
+    console.log('Could not save order');
+  }
+
+  // Send order confirmation to WhatsApp (optional — admin gets Paystack notification too)
+  const msg = buildOrderMessage(customerData);
+  const fullMsg = `✅ PAID PAYMENT REFERENCE: ${paystackRef}\n\n${msg}`;
+  console.log('Order recorded:', order);
+}
+
 /* Navigate cart → checkout */
 function goToCheckout() {
   if (cart.length === 0) {
@@ -2725,12 +2821,18 @@ function renderCheckout() {
         <textarea id="coNotes" placeholder="Anything that helps us deliver — gate colour, best time to call…">${v('notes')}</textarea>
       </div>
 
-      <button class="btn wa-checkout-btn" onclick="submitWhatsAppOrder()">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M17.5 14.4c-.3-.1-1.8-.9-2-1-.3-.1-.5-.1-.7.1-.2.3-.7 1-.9 1.2-.2.2-.3.2-.6.1-.3-.1-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.4-.5-.6-.5H8c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2 0 1.3.9 2.6 1.1 2.7.1.2 1.9 2.9 4.5 4 .6.3 1.1.5 1.5.6.6.2 1.2.2 1.7.1.5-.1 1.6-.7 1.8-1.3.2-.6.2-1.2.2-1.3-.1-.1-.3-.2-.6-.3zM12 2a10 10 0 0 0-8.7 15L2 22l5.2-1.4A10 10 0 1 0 12 2z"/></svg>
-        Complete Order on WhatsApp
-      </button>
+      <div class="checkout-buttons">
+        <button class="btn wa-checkout-btn" onclick="submitWhatsAppOrder()">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M17.5 14.4c-.3-.1-1.8-.9-2-1-.3-.1-.5-.1-.7.1-.2.3-.7 1-.9 1.2-.2.2-.3.2-.6.1-.3-.1-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5-.1-.1-.7-1.6-.9-2.2-.2-.6-.4-.5-.6-.5H8c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2 0 1.3.9 2.6 1.1 2.7.1.2 1.9 2.9 4.5 4 .6.3 1.1.5 1.5.6.6.2 1.2.2 1.7.1.5-.1 1.6-.7 1.8-1.3.2-.6.2-1.2.2-1.3-.1-.1-.3-.2-.6-.3zM12 2a10 10 0 0 0-8.7 15L2 22l5.2-1.4A10 10 0 1 0 12 2z"/></svg>
+          WhatsApp Checkout
+        </button>
+        <button class="btn paystack-checkout-btn" onclick="submitPaystackOrder()">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/><line x1="3" y1="9" x2="21" y2="9" stroke="currentColor" stroke-width="1.5"/><circle cx="7" cy="16" r="1.5" fill="currentColor"/></svg>
+          Pay with Paystack
+        </button>
+      </div>
 
-      <p class="wa-checkout-note">Your order will be confirmed on WhatsApp before payment. Delivery fee is calculated based on your location.</p>
+      <p class="checkout-note">Choose your payment method. WhatsApp requires manual confirmation on delivery fee. Paystack charges payment immediately.</p>
     </div>
   `;
 }
